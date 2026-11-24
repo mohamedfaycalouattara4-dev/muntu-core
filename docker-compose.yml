@@ -1,0 +1,151 @@
+# =============================================================================
+# KALYCE · Environnement de développement reproductible (ADR-0001)
+# Toutes les images sont épinglées au patch : la reproductibilité prime sur la
+# fraîcheur. Aucune valeur secrète ici : tout vient de .env (make secrets).
+# =============================================================================
+name: kalyce
+
+x-backend-env: &backend-env
+  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.dev}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY manquant — lancez « make secrets »}
+  DB_NAME: ${DB_NAME:-kalyce}
+  DB_USER: ${DB_USER:-kalyce}
+  DB_PASSWORD: ${DB_PASSWORD:-kalyce}
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY manquant — lancez « make secrets »}
+  HSZ_SIGNING_KEY: ${HSZ_SIGNING_KEY:?HSZ_SIGNING_KEY manquant — lancez « make secrets »}
+  AUDIT_SIGNING_KEY: ${AUDIT_SIGNING_KEY:?AUDIT_SIGNING_KEY manquant — lancez « make secrets »}
+  OTP_SALT_KEY: ${OTP_SALT_KEY:?OTP_SALT_KEY manquant — lancez « make secrets »}
+  S3_ENDPOINT_URL: http://minio:9000
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-kalyce-minio}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-kalyce-minio-dev}
+  EMAIL_HOST: mailhog
+  EMAIL_PORT: "1025"
+  TZ: UTC
+
+services:
+  postgres:
+    image: postgres:16.4-bookworm
+    environment:
+      POSTGRES_DB: ${DB_NAME:-kalyce}
+      POSTGRES_USER: ${DB_USER:-kalyce}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-kalyce}
+      TZ: UTC
+    # Volume NOMMÉ : les données de test survivent à « docker compose down ».
+    volumes:
+      - kalyce-postgres-data:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-kalyce} -d ${DB_NAME:-kalyce}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [kalyce-net]
+
+  redis:
+    image: redis:7.4.0-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - kalyce-redis-data:/data
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [kalyce-net]
+
+  minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kalyce-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-kalyce-minio-dev}
+    volumes:
+      - kalyce-minio-data:/data
+    ports: ["9000:9000", "9001:9001"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [kalyce-net]
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports: ["1025:1025", "8025:8025"]
+    networks: [kalyce-net]
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runtime
+    environment:
+      <<: *backend-env
+      KALYCE_RUN_MIGRATIONS: "true"
+    command:
+      ["gunicorn", "config.asgi:application",
+       "--worker-class", "uvicorn.workers.UvicornWorker",
+       "--bind", "0.0.0.0:8000", "--workers", "2", "--reload"]
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [kalyce-net]
+
+  worker:
+    build: { context: ./backend, dockerfile: Dockerfile, target: runtime }
+    environment: *backend-env
+    command: ["celery", "-A", "config.celery_app", "worker", "-l", "INFO", "--concurrency", "2"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config.celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks: [kalyce-net]
+
+  beat:
+    build: { context: ./backend, dockerfile: Dockerfile, target: runtime }
+    environment: *backend-env
+    command: ["celery", "-A", "config.celery_app", "beat", "-l", "INFO"]
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [kalyce-net]
+
+  frontend:
+    build: { context: ./frontend, dockerfile: Dockerfile, target: runtime }
+    environment:
+      TZ: UTC
+    ports: ["5173:8080"]
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [kalyce-net]
+
+volumes:
+  kalyce-postgres-data:
+    name: kalyce-postgres-data
+  kalyce-redis-data:
+    name: kalyce-redis-data
+  kalyce-minio-data:
+    name: kalyce-minio-data
+
+networks:
+  kalyce-net:
+    name: kalyce-net
+    driver: bridge

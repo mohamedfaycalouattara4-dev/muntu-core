@@ -1,0 +1,55 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+testpaths = ["tests", "apps"]
+addopts = "-ra --strict-markers"
+
+[tool.bandit]
+exclude_dirs = ["tests", "migrations"]
+skips = ["B101"]
+
+[tool.coverage.run]
+source = ["apps"]
+omit = ["*/migrations/*", "*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 95
+
+# ---------------------------------------------------------------------------
+# Outillage qualité (J0 — ADR-0006)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["migrations", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "C4", "DJ", "T20", "RUF"]
+ignore = ["S101", "RUF012", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests*.py" = ["S", "T20"]
+"tests/**" = ["S", "T20"]
+"**/settings/*.py" = ["F401", "F403", "F405", "S105"]
+"apps/core/management/commands/*.py" = ["T20"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main"]
+# Strict progressif : le noyau financier d'abord, extension par lots.
+files = ["apps/core", "apps/checkout", "apps/payments", "config"]
+exclude = "(migrations|tests|test_.*)"
+strict = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["apps.core.policies", "apps.checkout.state_machine", "apps.payments.services.ledger"]
+disallow_untyped_defs = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"

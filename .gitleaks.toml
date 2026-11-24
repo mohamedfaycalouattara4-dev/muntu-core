@@ -1,0 +1,18 @@
+# Configuration gitleaks — scan de l'intégralité de l'historique (DoD J0).
+title = "KALYCE gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valeurs factices assumées : modèles et fixtures de test"
+paths = [
+  '''\.env\.example$''',
+  '''docs/adr/.*\.md$''',
+  '''backend/config/settings/test\.py$''',
+  '''backend/fixtures/dev\.json$''',
+]
+regexes = [
+  '''replace-me-run-make-secrets''',
+  '''kalyce-minio-dev''',
+]

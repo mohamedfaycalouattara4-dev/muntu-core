@@ -1,0 +1,33 @@
+# Secrets et environnements — jamais versionnés (R7/ADR-0008)
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+backend/openapi.yaml
+backend/staticfiles/
+backend/media/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+
+# Outillage
+.DS_Store
+*.log
